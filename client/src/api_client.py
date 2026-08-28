@@ -1,28 +1,40 @@
-from shared.src.email_utils import normalise_email
+"""Client-side API operations for the password vault backup service."""
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives import serialization
+from __future__ import annotations
+
 import base64
 import json
 
-def create_signing_key(seed: bytes) -> Ed25519PrivateKey:
-    """
-    Create an Ed25519 signing key from a 32-byte seed.
-    """
-    return Ed25519PrivateKey.from_private_bytes(seed)
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-def build_envelope(signing_key: Ed25519PrivateKey, email: str, payload: bytes, nonce: int) -> dict:
-    """
-    Build a signed envelope containing the email, payload, nonce, and signature.
-    """
-    payload_b64 = base64.b64encode(payload).decode('ascii')
-    data = {
-        "email": normalise_email(email),
-        "payload": payload_b64,
-        "nonce": nonce,
-    }
-    message = json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8')
-    signature = signing_key.sign(message)
+from client.src.sign import build_envelope, build_unsigned_envelope
+from client.src.http_client import post_json, get_json
+from client.src.nonce_store import load_and_increment_nonce
 
-    data["signature"] = base64.b64encode(signature).decode('ascii')
-    return data
+
+def register(base_url: str, email: str, public_key_bytes: bytes) -> dict:
+    """Register a user (unsigned). Returns server JSON, including the mocked verification code."""
+    payload = {"type": "register", "public_key": base64.b64encode(public_key_bytes).decode("ascii")}
+    payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    envelope = build_unsigned_envelope(email, payload_bytes, nonce=0)
+    return post_json(f"{base_url.rstrip('/')}/register", envelope)
+
+
+def verify(base_url: str, email: str, code: str) -> dict:
+    return get_json(f"{base_url.rstrip('/')}/verify", {"email": email, "code": code})
+
+
+def store(base_url: str, email: str, signing_key: Ed25519PrivateKey, vault_blob: bytes) -> dict:
+    payload = {"type": "store", "vault": base64.b64encode(vault_blob).decode("ascii")}
+    payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    nonce = load_and_increment_nonce(email)
+    envelope = build_envelope(signing_key, email, payload_bytes, nonce)
+    return post_json(f"{base_url.rstrip('/')}/store", envelope)
+
+
+def retrieve(base_url: str, email: str, signing_key: Ed25519PrivateKey) -> dict:
+    payload = {"type": "retrieve"}
+    payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    nonce = load_and_increment_nonce(email)
+    envelope = build_envelope(signing_key, email, payload_bytes, nonce)
+    return post_json(f"{base_url.rstrip('/')}/retrieve", envelope)
