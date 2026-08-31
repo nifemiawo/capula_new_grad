@@ -1,21 +1,22 @@
 
 from typing import Literal
-from pydantic import BaseModel, EmailStr,Field
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 class EnvelopeBase(BaseModel):
     email: EmailStr
-    payload: str            
+    payload: str
     nonce: int = Field(ge=0)
-    signature: str | None = None   
+    signature: str | None = None
 
 class RegisterPayload(BaseModel):
     type: Literal["register"] = "register"
-    public_key: str          
+    public_key: str
 
 class StorePayload(BaseModel):
     type: Literal["store"] = "store"
-    vault: str               
+    vault: str
 
 class RetrievePayload(BaseModel):
     type: Literal["retrieve"] = "retrieve"

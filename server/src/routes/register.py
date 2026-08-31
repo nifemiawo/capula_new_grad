@@ -1,17 +1,19 @@
 import base64
-import json
+import binascii
+import secrets
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from pydantic import ValidationError
 
 from server.src.db import User, get_session
 from server.src.schemas import EnvelopeBase, RegisterPayload
 from shared.src.email_utils import normalise_email
 
-app = FastAPI()
+router = APIRouter()
 
 
-@app.post("/register")
+@router.post("/register")
 def register_user(envelope: EnvelopeBase, session: Session = Depends(get_session)) -> dict:
     """
     Register a new user with the provided envelope.
@@ -20,22 +22,47 @@ def register_user(envelope: EnvelopeBase, session: Session = Depends(get_session
     """
     email = normalise_email(envelope.email)
 
-    payload_bytes = base64.b64decode(envelope.payload)
-    payload = RegisterPayload.model_validate_json(payload_bytes)
-    public_key_bytes = base64.b64decode(payload.public_key)
+    try:
+        payload_bytes = base64.b64decode(envelope.payload, validate=True)
+        payload = RegisterPayload.model_validate_json(payload_bytes)
+        public_key_bytes = base64.b64decode(payload.public_key, validate=True)
+    except (ValueError, binascii.Error, ValidationError):
+        raise HTTPException(status_code=400, detail="malformed payload")
 
     existing_user = session.exec(select(User).where(User.email == email)).first()
     if existing_user:
         raise HTTPException(status_code=409, detail="User already exists")
 
+    verification_code = secrets.token_hex(4)
+
     new_user = User(
         email=email,
         public_key=public_key_bytes,
         verified=False,
+        verification_code=verification_code,
         last_nonce=0,
     )
     session.add(new_user)
     session.commit()
     session.refresh(new_user)
 
-    return {"message": "User registered, verification required", "user_id": new_user.id}
+    return {
+        "message": "User registered, verification required",
+        "user_id": new_user.id,
+        "verification_code": verification_code,
+    }
+
+
+@router.get("/verify")
+def verify_user(email: str, code: str, session: Session = Depends(get_session)) -> dict:
+    user = session.exec(select(User).where(User.email == normalise_email(email))).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.verification_code != code:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    user.verified = True
+    user.verification_code = None
+    session.add(user)
+    session.commit()
+    return {"message": "Email verified"}
