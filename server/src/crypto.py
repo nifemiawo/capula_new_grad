@@ -1,3 +1,15 @@
+"""Server-side signature verification.
+
+Reconstructs the same {email, payload, nonce} JSON used by the
+client's sign.py  and checks it against the caller's stored Ed25519 public key. Deliberately returns a plain bool rather
+than raising, so callers can turn a failed check into whatever HTTP response
+is appropriate without catching a cryptography-specific exception.
+"""
+
+import base64
+import binascii
+import json
+
 import base64
 import binascii
 import json
@@ -11,7 +23,6 @@ def verify_signature(public_key: bytes, email: str, payload: str, nonce:int, sig
     """
     Verify the signature of a signed envelope.
     """
-    signature_bytes = base64.b64decode(signature)
     data = {
         "email": normalise_email(email),
         "payload": payload,
@@ -20,6 +31,7 @@ def verify_signature(public_key: bytes, email: str, payload: str, nonce:int, sig
     message = json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8')
 
     try:
+        signature_bytes = base64.b64decode(signature)
         Ed25519PublicKey.from_public_bytes(public_key).verify(signature_bytes, message)
         return True
     except (InvalidSignature, ValueError, binascii.Error):

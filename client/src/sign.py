@@ -1,3 +1,13 @@
+"""Envelope construction and signing for the password vault client.
+
+Builds the signed request envelopes described by the API: an email,
+base64-encoded payload, and nonce, signed together as a single canonical
+JSON blob so the signature covers all three fields at once. Registration
+uses an unsigned envelope instead, since the client has no server-recognised
+key pair yet at that point.
+"""
+
+from __future__ import annotations
 from __future__ import annotations
 
 import base64
@@ -27,7 +37,7 @@ def build_envelope(signing_key: Ed25519PrivateKey, email: str, payload: bytes, n
     return data
 
 
-def build_unsigned_envelope(email: str, payload: bytes, nonce: int = 0) -> dict:
+def build_unsigned_envelope(email: str, payload: bytes, nonce: int) -> dict:
     """Build an unsigned envelope used for registration (signature omitted)."""
     payload_b64 = base64.b64encode(payload).decode("ascii")
     return {"email": normalise_email(email), "payload": payload_b64, "nonce": nonce}

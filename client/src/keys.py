@@ -13,9 +13,10 @@ from shared.src.email_utils import normalise_email
 
 _DERIVED_KEY_LENGTH = 64
 _SEED_LENGTH = 32
-_SCRYPT_COST = 2**14
+_SCRYPT_COST = 2**17
 _SCRYPT_BLOCK_SIZE = 8
 _SCRYPT_PARALLELISM = 1
+_SCRYPT_MAX_MEM = 256 * 1024 * 1024 
 
 def derive_keys(email: str, master_password: str) -> tuple[bytes, bytes]:
 	"""Derive signing and encryption seeds from an email and master password.
@@ -40,6 +41,8 @@ def derive_keys(email: str, master_password: str) -> tuple[bytes, bytes]:
 		r=_SCRYPT_BLOCK_SIZE,
 		p=_SCRYPT_PARALLELISM,
 		dklen=_DERIVED_KEY_LENGTH,
+		maxmem=_SCRYPT_MAX_MEM,
+
 	)
 
 	signing_seed = derived[:_SEED_LENGTH] # First 32 bytes for signing

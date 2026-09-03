@@ -1,3 +1,6 @@
+""" Registration routes for the API. 
+"""
+
 import base64
 import binascii
 import secrets
@@ -7,7 +10,7 @@ from sqlmodel import Session, select
 from pydantic import ValidationError
 
 from server.src.db import User, get_session
-from server.src.schemas import EnvelopeBase, RegisterPayload
+from server.src.model.schemas import EnvelopeBase, RegisterPayload
 from shared.src.email_utils import normalise_email
 
 router = APIRouter()
@@ -17,7 +20,7 @@ router = APIRouter()
 def register_user(envelope: EnvelopeBase, session: Session = Depends(get_session)) -> dict:
     """
     Register a new user with the provided envelope.
-    Registration is unsigned per spec; the email is verified separately
+    Registration is unsigned; the email is verified separately
     via the mock verification step before the account can be used.
     """
     email = normalise_email(envelope.email)
@@ -31,9 +34,9 @@ def register_user(envelope: EnvelopeBase, session: Session = Depends(get_session
 
     existing_user = session.exec(select(User).where(User.email == email)).first()
     if existing_user:
-        raise HTTPException(status_code=409, detail="User already exists")
-
-    verification_code = secrets.token_hex(4)
+        # Don't reveal whether the user exists or not, to avoid leaking information to potential attackers
+        return {"message": "If this user exists, a verification code has been created."} 
+    verification_code = secrets.token_hex(4) 
 
     new_user = User(
         email=email,
@@ -47,20 +50,18 @@ def register_user(envelope: EnvelopeBase, session: Session = Depends(get_session
     session.refresh(new_user)
 
     return {
-        "message": "User registered, verification required",
-        "user_id": new_user.id,
+        "message": "If this user exists, a verification code has been created.",
         "verification_code": verification_code,
     }
 
 
 @router.get("/verify")
 def verify_user(email: str, code: str, session: Session = Depends(get_session)) -> dict:
+    """ Verify a user's email address using the provided verification code"""
     user = session.exec(select(User).where(User.email == normalise_email(email))).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.verification_code != code:
-        raise HTTPException(status_code=400, detail="Invalid verification code")
-
+    if user is None or user.verification_code != code:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+    
     user.verified = True
     user.verification_code = None
     session.add(user)

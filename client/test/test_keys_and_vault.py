@@ -2,8 +2,9 @@ import base64
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-# ensure package imports resolve
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -13,7 +14,10 @@ from client.src.vault_encrypt import encrypt_vault, decrypt_vault
 
 
 class ClientKeysVaultTests(unittest.TestCase):
-    def test_derive_keys_properties(self) -> None:
+    @patch("client.src.keys.scrypt")
+    def test_derive_keys_properties(self, mock_scrypt) -> None:
+        mock_scrypt.return_value = bytes(range(64))
+
         signing, encryption = derive_keys("Test@Example.com", "hunter2")
         self.assertEqual(len(signing), 32)
         self.assertEqual(len(encryption), 32)

@@ -10,16 +10,14 @@ if ROOT_DIR not in sys.path:
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from vault_encrypt import decrypt_vault, encrypt_vault
+from client.src.vault_encrypt import decrypt_vault, encrypt_vault
 
 
 class VaultEncryptTests(unittest.TestCase):
     def test_encrypt_decrypt_round_trip(self) -> None:
         seed = bytes(range(32))
         plaintext = b"vault contents"
-
         ciphertext = encrypt_vault(plaintext, seed)
-
         self.assertIsInstance(ciphertext, bytes)
         self.assertGreater(len(ciphertext), len(plaintext))
         self.assertEqual(decrypt_vault(ciphertext, seed), plaintext)

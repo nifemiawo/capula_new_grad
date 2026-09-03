@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets
 import sys
 
@@ -27,7 +28,7 @@ from client.src.vault_encrypt import encrypt_vault, decrypt_vault
 from client.src import api_client
 from client.src.http_client import ApiError
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.environ.get("CAPULA_BASE_URL", "http://localhost:8000")
 
 
 def run_demo(email: str, master_password: str) -> None:
@@ -55,8 +56,8 @@ def run_demo(email: str, master_password: str) -> None:
     print("[4] Encrypting sample vault...")
     sample_vault = {
         "entries": [
-            {"site": "github.com", "username": "hbn", "password": "correct-horse-battery-staple"},
-            {"site": "email.com", "username": "hbn", "password": "synthetic-demo-password"},
+            {"site": "github.com", "username": "n!f3M1", "password": "hi1243"},
+            {"site": "email.com", "username": "oluwan1femi", "password": "demo1234"},
         ]
     }
     plaintext = json.dumps(sample_vault).encode("utf-8")
@@ -86,8 +87,7 @@ def run_demo(email: str, master_password: str) -> None:
 
     assert retrieved_blob == vault_blob, "retrieved ciphertext does not match stored ciphertext"
     assert decrypted_vault == sample_vault, "decrypted vault does not match original"
-    print("    success: retrieved vault matches original.\n")
-
+    print("    success: retrieved vault matches original.\n") 
     print("Demo complete.")
 
 

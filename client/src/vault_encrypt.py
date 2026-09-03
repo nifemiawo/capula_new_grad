@@ -1,13 +1,20 @@
+"""AES-GCM encryption/decryption for the client-side vault blob.
 
+The server never imports this module and never sees plaintext; encryption
+and decryption happen entirely on the client, using a 32-byte seed derived
+from the user's email and master password (see keys.py). Ciphertext is
+stored with its 12-byte nonce prepended so no extra parameter is needed to
+decrypt it later.
+"""
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 
-def _validate(ciphertext: bytes, encryption_seed: bytes) -> None:
+def _validate(text: bytes, encryption_seed: bytes) -> None:
 	"""Validate the inputs to encrypt_vault and decrypt_vault."""
-	if not isinstance(ciphertext, bytes):
+	if not isinstance(text, bytes):
 		raise TypeError("ciphertext must be bytes")
 	if not isinstance(encryption_seed, bytes):
 		raise TypeError("encryption_seed must be bytes")

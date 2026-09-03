@@ -1,4 +1,4 @@
-
+"""Pydantic schemas for the password vault API."""
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field

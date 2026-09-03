@@ -1,4 +1,4 @@
-"""Minimal JSON HTTP client using the standard library, no vault-specific logic."""
+"""Minimal JSON HTTP client using the standard library."""
 
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ class ApiError(RuntimeError):
 
 
 def post_json(url: str, data: dict) -> dict:
+    """Send a POST request with a JSON body and return the JSON response."""
     body = json.dumps(data).encode("utf-8")
     req = request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with request.urlopen(req) as resp:
+        with request.urlopen(req, timeout=30) as resp:
             return json.load(resp)
     except error.HTTPError as e:
         error_body = json.load(e)
@@ -27,10 +28,11 @@ def post_json(url: str, data: dict) -> dict:
 
 
 def get_json(url: str, params: dict) -> dict:
+    """Send a GET request with query parameters and return the JSON response."""
     query_string = parse.urlencode(params)
     req = request.Request(f"{url}?{query_string}", method="GET")
     try:
-        with request.urlopen(req) as resp:
+        with request.urlopen(req, timeout=30) as resp:
             return json.load(resp)
     except error.HTTPError as e:
         error_body = json.load(e)

@@ -1,10 +1,16 @@
 """
 Authenticated routes: /store and /retrieve.
-
-Both share identical auth checks (user exists, verified, nonce fresh,
-signature valid), factored into authenticate_request so neither route
-duplicates that logic. The server only ever handles ciphertext bytes,
-it never imports or calls decrypt_vault.
+Design notes:
+- User lookup and verification-status failures are collapsed into a single
+  generic 401 ("invalid credentials") rather than distinct 404/403 responses,
+  so an unauthenticated caller can't use these endpoints to enumerate which
+  emails are registered. This is a deliberate trade-off: a legitimate user
+  who forgot to verify their account gets a less specific error in exchange
+  for that information not being exposed to anyone else.
+- Nonce freshness is enforced with a single atomic conditional UPDATE
+  (last_nonce < envelope.nonce) rather than a separate read-then-write, so
+  two concurrent requests for the same user can't both pass a freshness
+  check against the same stale value.
 """
 
 from __future__ import annotations
@@ -14,16 +20,16 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
+from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
 from server.src.crypto import verify_signature
 from server.src.db import User, Vault, get_session
-from server.src.schemas import EnvelopeBase, StorePayload
+from server.src.model.schemas import EnvelopeBase, RetrievePayload, StorePayload
 from shared.src.email_utils import normalise_email
 
 router = APIRouter()
-
-
 def authenticate_request(envelope: EnvelopeBase, session: Session) -> tuple[User, dict]:
     """
     Run all shared checks for an authenticated request.
@@ -33,16 +39,12 @@ def authenticate_request(envelope: EnvelopeBase, session: Session) -> tuple[User
     email = normalise_email(envelope.email)
 
     user = session.exec(select(User).where(User.email == email)).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="user not found")
-
-    if not user.verified:
-        raise HTTPException(status_code=403, detail="account not verified")
+    if user is None or not user.verified:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if envelope.signature is None:
-            raise HTTPException(status_code=400, detail="signature required")
-    
-    
+        raise HTTPException(status_code=400, detail="signature required")
+
     if not verify_signature(
         public_key=user.public_key,
         email=envelope.email,
@@ -50,13 +52,19 @@ def authenticate_request(envelope: EnvelopeBase, session: Session) -> tuple[User
         nonce=envelope.nonce,
         signature=envelope.signature,
     ):
-        raise HTTPException(status_code=401, detail="invalid signature")
+        raise HTTPException(status_code=401, detail="invalid credentials")
 
-
-    if envelope.nonce <= user.last_nonce:
+    # Prevent race conditions by atomically updating the last_nonce in the database if the provided nonce is greater than the stored last_nonce
+    result = session.exec(
+        sa_update(User)
+        .where(User.id == user.id, User.last_nonce < envelope.nonce)
+        .values(last_nonce=envelope.nonce)
+    )
+    session.commit()
+    if result.rowcount == 0:
         raise HTTPException(status_code=409, detail="nonce already used or stale")
+    session.refresh(user)
 
-    
     try:
         payload_bytes = base64.b64decode(envelope.payload, validate=True)
         inner = json.loads(payload_bytes)
@@ -66,20 +74,18 @@ def authenticate_request(envelope: EnvelopeBase, session: Session) -> tuple[User
     return user, inner
 
 
-def _advance_nonce(session: Session, user: User, nonce: int) -> None:
-    user.last_nonce = nonce
-    session.add(user)
-    session.commit()
-
-
 @router.post("/store")
-def store(envelope: EnvelopeBase, session: Session = Depends(get_session)):
+def store(envelope: EnvelopeBase, session: Session = Depends(get_session)) -> dict:
+    """Store the provided vault for the authenticated user"""
     user, inner = authenticate_request(envelope, session)
 
     if inner.get("type") != "store":
         raise HTTPException(status_code=400, detail="type mismatch for this endpoint")
 
-    payload = StorePayload(**inner)
+    try:
+        payload = StorePayload(**inner)
+    except ValidationError:
+        raise HTTPException(status_code=400, detail="malformed payload")
 
     try:
         vault_blob = base64.b64decode(payload.vault, validate=True)
@@ -107,23 +113,25 @@ def store(envelope: EnvelopeBase, session: Session = Depends(get_session)):
                 created_at=datetime.now(timezone.utc),
             )
         )
-
-    _advance_nonce(session, user, envelope.nonce)
+    session.commit()
     return {"status": "stored"}
 
-
 @router.post("/retrieve")
-def retrieve(envelope: EnvelopeBase, session: Session = Depends(get_session)):
+def retrieve(envelope: EnvelopeBase, session: Session = Depends(get_session)) -> dict:
+    """Retrieve the stored vault for the authenticated user"""
     user, inner = authenticate_request(envelope, session)
 
     if inner.get("type") != "retrieve":
         raise HTTPException(status_code=400, detail="type mismatch for this endpoint")
+
+    try:
+        RetrievePayload(**inner)
+    except ValidationError:
+        raise HTTPException(status_code=400, detail="malformed payload")
 
     vault = session.get(Vault, user.id)
     if vault is None:
         raise HTTPException(status_code=404, detail="no vault stored for this user")
 
     vault_blob = vault.encryption_nonce + vault.ciphertext
-
-    _advance_nonce(session, user, envelope.nonce)
     return {"vault": base64.b64encode(vault_blob).decode("ascii")}
